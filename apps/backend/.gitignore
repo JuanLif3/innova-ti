@@ -3,3 +3,13 @@ node_modules
 .env
 
 /generated/prisma
+
+# TypeScript build cache
+*.tsbuildinfo
+tsconfig.build.tsbuildinfo
+
+# Env
+.env
+
+# Prisma config duplicado (defensa contra errores)
+prisma.config.ts
