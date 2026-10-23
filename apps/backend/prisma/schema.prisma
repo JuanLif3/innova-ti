@@ -1,0 +1,436 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ==================== ENUMS ====================
+
+enum Rol {
+  ADMIN
+  GERENTE
+  ENCARGADO_AREA
+  TECNICO_TI
+  ENCARGADO_SEGURIDAD
+  EMPLEADO
+}
+
+enum EstadoIdea {
+  PROPUESTA
+  FILTRO_AREA
+  VIABILIDAD_TECNICA
+  CUMPLIMIENTO_SEGURIDAD
+  APROBACION_GERENTE
+  EN_DESARROLLO
+  COMPLETADA
+  RECHAZADA
+}
+
+enum PilarEstrategico {
+  INFRAESTRUCTURA
+  SEGURIDAD
+  EXPERIENCIA_CLIENTE
+  EFICIENCIA_OPERATIVA
+}
+
+enum Criticidad {
+  ALTA
+  MEDIA
+  BAJA
+}
+
+enum PrioridadTicket {
+  ALTA
+  MEDIA
+  BAJA
+}
+
+enum EstadoTicket {
+  ABIERTO
+  EN_PROGRESO
+  RESUELTO
+  CERRADO
+  VENCIDO
+}
+
+enum TipoActivo {
+  BASE_DATOS
+  SERVIDOR
+  EQUIPO
+  SOFTWARE
+  RED
+}
+
+enum NivelRiesgo {
+  VERDE
+  AMARILLO
+  ROJO
+}
+
+enum NivelMeta {
+  EMPRESA
+  TI
+  PROCESO
+}
+
+enum TipoEvaluacionFundibeq {
+  AUTOEVALUACION
+  EXTERNA
+  BENCHMARKING
+}
+
+enum TipoElementoFundibeq {
+  FACILITADOR
+  RESULTADO
+}
+
+enum EstadoGenerico {
+  PENDIENTE
+  EN_CURSO
+  COMPLETADO
+}
+
+enum EstadoPropuesta {
+  BORRADOR
+  APROBADA
+  RECHAZADA
+  EN_EJECUCION
+  COMPLETADA
+}
+
+// ==================== MÓDULO 0: USUARIOS ====================
+
+model Usuario {
+  id             String   @id @default(cuid())
+  nombre         String
+  email          String   @unique
+  passwordHash   String
+  rol            Rol      @default(EMPLEADO)
+  area           String?
+  activo         Boolean  @default(true)
+  ideasMesActual Int      @default(0)
+  ultimoReinicio DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  ideas                 Idea[]
+  apoyos                ApoyoIdea[]
+  historial             HistorialIdea[]
+  auditorias            AuditLog[]
+  ticketsCreados        Ticket[]            @relation("TicketCreador")
+  ticketsAsignados      Ticket[]            @relation("TicketTecnico")
+  serviciosComoDueno    Servicio[]          @relation("DuenoServicio")
+  activosComoDueno      Activo[]            @relation("DuenoActivo")
+  riesgosMitigados      Riesgo[]            @relation("ResponsableMitigacion")
+  controlesResponsable  Control[]
+  incidentesReportados  IncidenteSeguridad[]
+  propuestasCreadas     PropuestaSolucion[]
+  planificaciones       Planificacion[]
+  mantenimientos        Mantenimiento[]
+
+  @@index([rol])
+}
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  idUsuario      String?
+  accion         String   // "CREATE" | "UPDATE" | "DELETE"
+  tablaAfectada  String
+  idRegistro     String?
+  datosAnteriores Json?
+  datosNuevos    Json?
+  ip             String?
+  userAgent      String?
+  createdAt      DateTime @default(now())
+
+  usuario Usuario? @relation(fields: [idUsuario], references: [id])
+
+  @@index([tablaAfectada])
+  @@index([idUsuario])
+  @@index([createdAt])
+}
+
+// ==================== MÓDULO 1: KANBAN ====================
+
+model Idea {
+  id             String          @id @default(cuid())
+  titulo         String
+  descripcion    String
+  pilar          PilarEstrategico
+  estado         EstadoIdea      @default(PROPUESTA)
+  scorePrioridad Int?
+  motivoRechazo  String?
+  idUsuario      String
+  idMeta         String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  usuario  Usuario         @relation(fields: [idUsuario], references: [id])
+  meta     MetaCOBIT?      @relation(fields: [idMeta], references: [id])
+  apoyos   ApoyoIdea[]
+  historial HistorialIdea[]
+  feedback FeedbackIdea?
+
+  @@index([estado])
+  @@index([pilar])
+}
+
+model ApoyoIdea {
+  id        String   @id @default(cuid())
+  idIdea    String
+  idUsuario String
+  createdAt DateTime @default(now())
+
+  idea    Idea    @relation(fields: [idIdea], references: [id], onDelete: Cascade)
+  usuario Usuario @relation(fields: [idUsuario], references: [id])
+
+  @@unique([idIdea, idUsuario])
+}
+
+model HistorialIdea {
+  id             String     @id @default(cuid())
+  idIdea         String
+  estadoAnterior EstadoIdea
+  estadoNuevo    EstadoIdea
+  idUsuario      String
+  comentario     String?
+  createdAt      DateTime   @default(now())
+
+  idea    Idea    @relation(fields: [idIdea], references: [id], onDelete: Cascade)
+  usuario Usuario @relation(fields: [idUsuario], references: [id])
+}
+
+model FeedbackIdea {
+  id           String   @id @default(cuid())
+  idIdea       String   @unique
+  calificacion Int
+  comentario   String?
+  createdAt    DateTime @default(now())
+
+  idea Idea @relation(fields: [idIdea], references: [id], onDelete: Cascade)
+}
+
+// ==================== MÓDULO 2: SERVICIOS ====================
+
+model Servicio {
+  id            String     @id @default(cuid())
+  nombre        String
+  descripcion   String
+  criticidad    Criticidad
+  slaHoras      Int
+  idDueno       String
+  valorGenerado String?
+  activo        Boolean    @default(true)
+
+  // Cadena ITIL 4: 6 actividades
+  cadenaITIL Json @default("{\"planificar\":false,\"mejorar\":false,\"involucrar\":false,\"disenar_transitar\":false,\"obtener_construir\":false,\"entregar_soportar\":false}")
+
+  // Entradas/salidas: [{tipo:"entrada"|"salida", descripcion, fecha}]
+  entradasSalidas Json @default("[]")
+
+  // Continuidad operacional
+  rtoHoras           Int?
+  rpoHoras           Int?
+  estrategiaRespaldo String?
+  continuidadEstado  String?   // "vigente" | "por_revisar" | "vencido"
+  ultimaPrueba       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  dueno   Usuario  @relation("DuenoServicio", fields: [idDueno], references: [id])
+  tickets Ticket[]
+
+  @@index([activo])
+}
+
+model Ticket {
+  id                String          @id @default(cuid())
+  idServicio        String
+  idUsuario         String
+  idTecnicoAsignado String?
+  descripcion       String
+  prioridad         PrioridadTicket
+  estado            EstadoTicket    @default(ABIERTO)
+  fechaCreacion     DateTime        @default(now())
+  fechaLimite       DateTime
+  fechaResolucion   DateTime?
+
+  servicio Servicio @relation(fields: [idServicio], references: [id])
+  creador  Usuario  @relation("TicketCreador", fields: [idUsuario], references: [id])
+  tecnico  Usuario? @relation("TicketTecnico", fields: [idTecnicoAsignado], references: [id])
+
+  @@index([estado])
+  @@index([idTecnicoAsignado])
+}
+
+// ==================== MÓDULO 3: SEGURIDAD ====================
+
+model Activo {
+  id         String     @id @default(cuid())
+  nombre     String
+  tipo       TipoActivo
+  ubicacion  String?
+  idDueno    String
+  criticidad Criticidad
+
+  // 7 requisitos COBIT (1-5): {efectividad, eficiencia, confidencialidad, integridad, disponibilidad, cumplimiento, confiabilidad}
+  requisitosCOBIT Json?
+
+  createdAt DateTime @default(now())
+
+  dueno      Usuario              @relation("DuenoActivo", fields: [idDueno], references: [id])
+  riesgos    Riesgo[]
+  incidentes IncidenteSeguridad[]
+}
+
+model Riesgo {
+  id              String      @id @default(cuid())
+  idActivo        String
+  amenaza         String
+  vulnerabilidad  String
+  probabilidad    Int         // 1-5
+  impacto         Int         // 1-5
+  riesgoCalculado Int
+  nivel           NivelRiesgo
+
+  // Plan de mitigación (obligatorio si nivel=ROJO)
+  accionMitigacion        String?
+  idResponsableMitigacion String?
+  fechaLimiteMitigacion   DateTime?
+  estadoMitigacion        EstadoGenerico?
+
+  createdAt DateTime @default(now())
+
+  activo      Activo   @relation(fields: [idActivo], references: [id], onDelete: Cascade)
+  responsable Usuario? @relation("ResponsableMitigacion", fields: [idResponsableMitigacion], references: [id])
+
+  @@index([nivel])
+}
+
+model Control {
+  id                  String    @id @default(cuid())
+  nombre              String
+  descripcion         String
+  implementado        Boolean   @default(false)
+  fechaImplementacion DateTime?
+  idResponsable       String?
+
+  responsable Usuario? @relation(fields: [idResponsable], references: [id])
+}
+
+model IncidenteSeguridad {
+  id             String   @id @default(cuid())
+  fecha          DateTime @default(now())
+  tipo           String
+  idActivo       String
+  impacto        String
+  acciones       String?
+  estado         String   // "abierto" | "en_investigacion" | "cerrado"
+  idReportadoPor String
+
+  activo       Activo  @relation(fields: [idActivo], references: [id])
+  reportadoPor Usuario @relation(fields: [idReportadoPor], references: [id])
+}
+
+// ==================== MÓDULO 4: GOBERNANZA ====================
+
+model MetaCOBIT {
+  id          String    @id @default(cuid())
+  nivel       NivelMeta
+  descripcion String
+  idMetaPadre String?
+
+  metaPadre MetaCOBIT?  @relation("JerarquiaMetas", fields: [idMetaPadre], references: [id])
+  subMetas  MetaCOBIT[] @relation("JerarquiaMetas")
+  ideas     Idea[]
+}
+
+model Madurez {
+  id              String   @id @default(cuid())
+  proceso         String   @unique
+  nivelActual     Int      // 0-5
+  nivelObjetivo   Int      // 0-5
+  fechaEvaluacion DateTime @default(now())
+  observaciones   String?
+}
+
+model EvaluacionFundibeq {
+  id             String                  @id @default(cuid())
+  tipoElemento   TipoElementoFundibeq
+  nombre         String                  // uno de los 5 facilitadores o 4 criterios
+  puntuacion     Int                     // 1-10
+  evidencias     String?
+  tipoEvaluacion TipoEvaluacionFundibeq @default(AUTOEVALUACION)
+  fecha          DateTime                @default(now())
+
+  @@index([tipoElemento, nombre])
+}
+
+// ==================== MÓDULO 5: IMPLEMENTACIÓN + CONFIG ====================
+
+model PropuestaSolucion {
+  id        String          @id @default(cuid())
+  objetivo  String
+  cambios   String
+  inversion Float
+  costo     Float
+  beneficio String
+  riesgo    String
+  estado    EstadoPropuesta @default(BORRADOR)
+  idUsuario String
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  usuario Usuario @relation(fields: [idUsuario], references: [id])
+}
+
+model Planificacion {
+  id            String         @id @default(cuid())
+  hito          String
+  entregable    String
+  idResponsable String
+  fechaEntrega  DateTime
+  estado        EstadoGenerico @default(PENDIENTE)
+
+  responsable Usuario @relation(fields: [idResponsable], references: [id])
+}
+
+model Mantenimiento {
+  id            String         @id @default(cuid())
+  tipo          String         // "actualizacion" | "capacitacion" | "revision" | "auditoria"
+  descripcion   String
+  fecha         DateTime       @default(now())
+  idResponsable String
+  estado        EstadoGenerico @default(PENDIENTE)
+
+  responsable Usuario @relation(fields: [idResponsable], references: [id])
+}
+
+model FaseImplementacion {
+  id          String         @id @default(cuid())
+  fase        Int            @unique // 1-7
+  nombre      String
+  estado      EstadoGenerico @default(PENDIENTE)
+  fechaInicio DateTime?
+  fechaFin    DateTime?
+  evidencias  String?
+}
+
+model FactorDiseno {
+  id          String   @id @default(cuid())
+  nombre      String   @unique
+  valor       String
+  descripcion String?
+  updatedAt   DateTime @updatedAt
+}
+
+model Configuracion {
+  id          String   @id @default(cuid())
+  clave       String   @unique
+  valor       String
+  descripcion String?
+  updatedAt   DateTime @updatedAt
+}
