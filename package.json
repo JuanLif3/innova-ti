@@ -1,0 +1,13 @@
+{
+  "name": "innova-ti",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/backend",
+    "apps/frontend"
+  ],
+  "scripts": {
+    "dev:back": "npm run start:dev --workspace=backend",
+    "dev:front": "npm run dev --workspace=frontend"
+  }
+}
